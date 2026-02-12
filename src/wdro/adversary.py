@@ -3,24 +3,35 @@ import torch.nn.functional as F
 
 def wdro_inner_max_w2(
     model,
-    x0,                 # (b,d) in [0,1]
-    y,                  # (b,1) in {0,1}
-    lam_dual: float,    # λ >= 0 (dual weight)
+    x0: torch.Tensor,          # (b,d) in [0,1]
+    y: torch.Tensor,           # (b,1) in {0,1}
+    lam_dual: float,           # lambda >= 0
     steps: int,
     step_size: float,
-    mutable_mask,       # (d,)
-    clamp_box: bool = True,
-):
+    mutable_mask: torch.Tensor # (d,) float {0,1}
+) -> torch.Tensor:
     """
-    Inner maximization for W2-Wasserstein DRO (Kantorovich dual inner sup):
-        max_{x in constraints}  loss_theta(x,y) - lam * ||x - x0||^2
+    Inner maximization (Kantorovich dual inner sup) for W2-WDRO:
 
-    Projected gradient ascent on x with:
-      - box constraint [0,1]
-      - immutability mask
+      x_adv = argmax_x  BCEWithLogits(model(x), y) - lam * mean(||x-x0||^2)
+
+    with constraints:
+      - box: x in [0,1]^d
+      - immutability: x_j = x0_j for mask_j = 0
+
+    Notes:
+      - Requires gradients w.r.t. x.
+      - Uses projected gradient ascent.
+      - Returns a detached tensor (safe for outer loops).
     """
-    mask = mutable_mask.view(1, -1)
-    x = x0.clone()
+    model.eval()  # adversary uses current model parameters; no dropout anyway
+
+    mask = mutable_mask.view(1, -1).to(dtype=x0.dtype, device=x0.device)
+    x = x0.detach().clone()  # start at x0
+    x0_det = x0.detach()
+
+    lam = float(max(lam_dual, 0.0))
+    eta = float(step_size)
 
     for _ in range(int(steps)):
         x.requires_grad_(True)
@@ -28,18 +39,25 @@ def wdro_inner_max_w2(
         logits = model(x)
         loss = F.binary_cross_entropy_with_logits(logits, y)
 
-        cost = ((x - x0) ** 2).sum(dim=1).mean()  # mean transport cost
-        obj = loss - float(lam_dual) * cost       # maximize
+        # mean squared transport cost
+        cost = ((x - x0_det) ** 2).sum(dim=1).mean()
 
-        g = torch.autograd.grad(obj, x, create_graph=False)[0]
-        g = g * mask  # freeze immutable features
+        # maximize objective
+        obj = loss - lam * cost
 
-        x = (x + float(step_size) * g).detach()
+        # gradient wrt x (no graph needed here)
+        g = torch.autograd.grad(obj, x, create_graph=False, retain_graph=False)[0]
 
-        if clamp_box:
-            x = torch.clamp(x, 0.0, 1.0)
+        # apply immutability: only mutable dims can move
+        g = g * mask
+
+        # ascent step
+        x = (x + eta * g).detach()
+
+        # project to box
+        x = torch.clamp(x, 0.0, 1.0)
 
         # enforce immutables exactly
-        x = x * mask + x0 * (1.0 - mask)
+        x = x * mask + x0_det * (1.0 - mask)
 
-    return x
+    return x.detach()
