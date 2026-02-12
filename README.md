@@ -1,4 +1,3 @@
-
 # Wasserstein Strategic Classification (W2 WDRO)
 
 Research-grade implementation of W2 Wasserstein Distributionally Robust Optimization (WDRO) for strategic classification under transport-bounded distribution shift.
@@ -7,31 +6,25 @@ This framework trains a neural classifier against worst-case transported inputs 
 
 ---
 
-## Robust Objective (Kantorovich Dual Form)
+## Robust Objective (Intuitive Form)
 
-We consider distributional robustness under a Wasserstein-2 transport constraint.
+We study worst-case risk under a Wasserstein-2 transport constraint.
 
-Robust risk can be written as:
+The robust objective can be written as:
 
-sup_{Q: W_2(Q,P) ≤ ρ}  E_Q[ ℓ_θ(x, y) ]
+> sup over Q such that W₂(Q,P) ≤ ρ of E_Q[ℓ_θ(x, y)]
 
-Using the Kantorovich dual, this becomes:
+Using the Kantorovich dual representation, this becomes:
 
-inf_{λ ≥ 0} (
-    λρ +
-    E_{(x,y) ~ P} [
-        sup_{x'} (
-            ℓ_θ(x', y) − λ ||x' − x||²
-        )
-    ]
-)
+> inf over λ ≥ 0 of  
+> λρ + E_{(x,y) ~ P} [ sup over x' of ( ℓ_θ(x', y) − λ‖x' − x‖² ) ]
 
 Where:
 
-- ρ is the transport budget
-- λ is the dual variable
-- ℓ_θ is the classification loss
-- ||x' − x||² is the W2 transport cost
+- ρ is the transport budget  
+- λ is the dual variable  
+- ℓ_θ(x,y) is the classification loss  
+- ‖x' − x‖² is the squared transport cost  
 
 ---
 
@@ -39,10 +32,10 @@ Where:
 
 Transported inputs satisfy:
 
-- x' ∈ [0,1]^d
-- x'_j = x_j for immutable features j
+- x' ∈ [0,1]^d  
+- x'_j = x_j for immutable features j  
 
-This enforces box constraints and feature immutability.
+This enforces both box constraints and feature immutability.
 
 ---
 
@@ -50,18 +43,13 @@ This enforces box constraints and feature immutability.
 
 The learner minimizes:
 
-min_θ (
-    λρ +
-    E_{(x,y) ~ P} [
-        sup_{x'} (
-            ℓ_θ(x', y) − λ ||x' − x||²
-        )
-    ]
-)
+> λρ + E_{(x,y) ~ P} [ sup over x' of ( ℓ_θ(x', y) − λ‖x' − x‖² ) ]
 
-Dual update rule:
+The dual variable is updated adaptively:
 
-λ ← max(0, λ + η_λ ( E[||x' − x||²] − ρ ))
+> λ ← max(0, λ + η_λ ( E[‖x' − x‖²] − ρ ))
+
+This ensures the average transport cost stays near the target budget ρ.
 
 ---
 
@@ -69,17 +57,17 @@ Dual update rule:
 
 We study robust learning under:
 
-- Strategic feature manipulation
-- Transport-bounded distribution shift
-- Worst-case loss maximization
-- Adaptive dual optimization
+- Strategic feature manipulation  
+- Transport-bounded distribution shift  
+- Worst-case loss maximization  
+- Adaptive dual optimization  
 
 ---
 
 ## Key Components
 
 - TinyMLP classifier (CPU-friendly)
-- W2 Wasserstein inner adversary (projected gradient ascent)
+- W2 Wasserstein inner adversary via projected gradient ascent
 - Immutable feature masking
 - Adaptive dual variable update
 - Clean ERM baseline
@@ -91,7 +79,7 @@ We study robust learning under:
 
 - Clean vs robust accuracy
 - Effect of transport budget ρ
-- Dual variable convergence
+- Dual variable convergence behavior
 - Robustness under adversarial transport
 - Decision boundary visualization (2D case)
 
@@ -136,10 +124,10 @@ Docker-based deployment compatible with CPU instances.
 
 ## Notes
 
-- Designed for CPU-only environments
-- Inner maximization approximated via projected gradient ascent
-- Synthetic correlated dataset generator included
-- Intended for research and experimentation
+- Designed for CPU-only environments  
+- Inner maximization approximated via projected gradient ascent  
+- Synthetic correlated dataset generator included  
+- Intended for research and experimentation  
 
 ---
 
@@ -148,4 +136,10 @@ Docker-based deployment compatible with CPU instances.
 MIT License
 
 ---
+
+## Citation 
+
+Sariah Haque (2026). Wasserstein Strategic Classification (W2 WDRO). Interactive robust learning framework.
+
+
 
