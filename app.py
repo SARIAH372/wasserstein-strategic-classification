@@ -10,7 +10,9 @@ from src.data import make_synthetic
 from src.model import TinyMLP
 
 
-from src.wdro import train_wdro_w2_dual, eval_wdro_metrics
+from src.wdro.train import train_wdro_w2_dual
+from src.wdro.eval import eval_wdro_metrics
+
 
 
 # -----------------------------
@@ -312,4 +314,5 @@ with tabs[3]:
 
         if d_int == 2 and show_2d and st.session_state.model_v4 is not None:
             st.pyplot(plot_decision_2d(X_np, y_np, st.session_state.model_v4, "v4 W2-DRO decision surface (clean grid)"))
+
 
