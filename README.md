@@ -1,87 +1,70 @@
 # Wasserstein Strategic Classification (W2 WDRO)
 
-Research-grade implementation of W2 Wasserstein Distributionally Robust Optimization (WDRO) for strategic classification under transport-bounded distribution shift.
+A research-grade implementation of Wasserstein Distributionally Robust Optimization (W2 WDRO) for strategic classification under transport-bounded distribution shift.
 
-This framework trains a neural classifier against worst-case transported inputs using the Kantorovich dual formulation.
+This project studies robust learning against worst-case transported inputs using the Kantorovich dual formulation and adaptive dual optimization.
 
 ---
 
-## Robust Objective (Intuitive Form)
+## Abstract
 
-We study worst-case risk under a Wasserstein-2 transport constraint.
+We investigate distributionally robust learning under transport-constrained strategic shifts. Given a base distribution P, we optimize classifier parameters to minimize worst-case risk over all distributions Q within a Wasserstein-2 ball of radius ρ around P. Using the Kantorovich dual representation, robust risk reduces to an inner loss-maximization problem regularized by a squared transport penalty and an outer minimization with adaptive dual updates. The framework supports feature immutability constraints, clean ERM baselines, and interactive exploration of robustness–accuracy trade-offs.
 
-The robust objective can be written as:
+---
 
-> sup over Q such that W₂(Q,P) ≤ ρ of E_Q[ℓ_θ(x, y)]
+## Robust Learning Framework
 
-Using the Kantorovich dual representation, this becomes:
+We consider worst-case risk under a Wasserstein-2 constraint:
 
-> inf over λ ≥ 0 of  
-> λρ + E_{(x,y) ~ P} [ sup over x' of ( ℓ_θ(x', y) − λ‖x' − x‖² ) ]
+sup over Q such that W2(Q, P) ≤ ρ of E_Q[ loss_theta(x, y) ]
+
+Using the Kantorovich dual, this becomes:
+
+inf over λ ≥ 0 of
+
+    λρ
+    + E_{(x,y)~P} [
+        sup over x' of (
+            loss_theta(x', y)
+            − λ ||x' − x||^2
+        )
+      ]
 
 Where:
 
-- ρ is the transport budget  
-- λ is the dual variable  
-- ℓ_θ(x,y) is the classification loss  
-- ‖x' − x‖² is the squared transport cost  
+- ρ is the transport budget
+- λ is the adaptive dual variable
+- loss_theta(x, y) is the classification loss
+- ||x' − x||^2 is the squared transport cost
+
+The dual variable is updated as:
+
+λ ← max(0, λ + η_lambda ( E[ ||x' − x||^2 ] − ρ ))
 
 ---
 
-## Feasible Set
+## Design Principles
 
-Transported inputs satisfy:
+This implementation emphasizes:
 
-- x' ∈ [0,1]^d  
-- x'_j = x_j for immutable features j  
-
-This enforces both box constraints and feature immutability.
-
----
-
-## Training Objective
-
-The learner minimizes:
-
-> λρ + E_{(x,y) ~ P} [ sup over x' of ( ℓ_θ(x', y) − λ‖x' − x‖² ) ]
-
-The dual variable is updated adaptively:
-
-> λ ← max(0, λ + η_λ ( E[‖x' − x‖²] − ρ ))
-
-This ensures the average transport cost stays near the target budget ρ.
-
----
-
-## Problem Setting
-
-We study robust learning under:
-
-- Strategic feature manipulation  
-- Transport-bounded distribution shift  
-- Worst-case loss maximization  
-- Adaptive dual optimization  
-
----
-
-## Key Components
-
-- TinyMLP classifier (CPU-friendly)
-- W2 Wasserstein inner adversary via projected gradient ascent
+- Robust optimization under explicit transport constraints
+- Adaptive dual variable learning
+- Projected gradient-based inner maximization
 - Immutable feature masking
-- Adaptive dual variable update
-- Clean ERM baseline
-- Fully interactive Streamlit UI
+- CPU-only reproducibility
+- Fully interactive experimentation
 
 ---
 
-## What You Can Explore
+## Experimental Capabilities
 
-- Clean vs robust accuracy
-- Effect of transport budget ρ
-- Dual variable convergence behavior
-- Robustness under adversarial transport
-- Decision boundary visualization (2D case)
+The framework allows you to:
+
+- Compare ERM vs WDRO training
+- Vary transport budget ρ
+- Observe dual variable convergence
+- Measure robust vs clean accuracy
+- Visualize decision boundaries (2D case)
 
 ---
 
@@ -105,7 +88,7 @@ src/
 
 ---
 
-## Local Installation
+## Installation
 
 pip install -r requirements.txt  
 streamlit run app.py  
@@ -114,20 +97,11 @@ streamlit run app.py
 
 ## Deployment
 
-### Railway (recommended)
-Uses Dockerfile with dynamic $PORT binding.
+### Railway
+Docker-based deployment using dynamic $PORT binding.
 
 ### Hugging Face Spaces
-Docker-based deployment compatible with CPU instances.
-
----
-
-## Notes
-
-- Designed for CPU-only environments  
-- Inner maximization approximated via projected gradient ascent  
-- Synthetic correlated dataset generator included  
-- Intended for research and experimentation  
+Compatible with CPU Docker Spaces.
 
 ---
 
@@ -137,9 +111,12 @@ MIT License
 
 ---
 
-## Citation 
+## Citation
 
-Sariah Haque (2026). Wasserstein Strategic Classification (W2 WDRO). Interactive robust learning framework.
+Haque, S. (2026). Wasserstein Strategic Classification (W2 WDRO). Interactive robust learning framework.
+
+
+
 
 
 
