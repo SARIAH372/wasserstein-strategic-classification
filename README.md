@@ -1,107 +1,113 @@
 # Wasserstein Strategic Classification (W2 WDRO)
 
-A research-grade implementation of Wasserstein Distributionally Robust Optimization (W2 WDRO) for strategic classification under transport-bounded distribution shift.
+Research-grade implementation of Wasserstein Distributionally Robust Optimization (W2 WDRO) for strategic classification under transport-bounded distribution shift.
 
-This project studies robust learning against worst-case transported inputs using the Kantorovich dual formulation and adaptive dual optimization.
-
----
-
-## Abstract
-
-We investigate distributionally robust learning under transport-constrained strategic shifts. Given a base distribution P, we optimize classifier parameters to minimize worst-case risk over all distributions Q within a Wasserstein-2 ball of radius ρ around P. Using the Kantorovich dual representation, robust risk reduces to an inner loss-maximization problem regularized by a squared transport penalty and an outer minimization with adaptive dual updates. The framework supports feature immutability constraints, clean ERM baselines, and interactive exploration of robustness–accuracy trade-offs.
+This project trains a neural classifier against worst-case transported inputs using the Kantorovich dual view (inner loss-maximizing adversary + adaptive dual updates).
 
 ---
 
-## Robust Learning Framework
+## Summary
 
-We consider worst-case risk under a Wasserstein-2 constraint:
+Goal:
+Train a classifier that performs well not only on the observed data distribution P, but also under worst-case distribution shifts constrained by a Wasserstein-2 transport budget.
 
-sup over Q such that W2(Q, P) ≤ ρ of E_Q[ loss_theta(x, y) ]
+Key idea:
+Worst-case distribution shift can be handled via a dual formulation that turns robustness into (1) an inner adversary that searches for hard transported inputs and (2) an outer learner update that improves robustness.
 
-Using the Kantorovich dual, this becomes:
+---
 
-inf over λ ≥ 0 of
+## Robust Objective (Plain Text)
 
-    λρ
-    + E_{(x,y)~P} [
-        sup over x' of (
-            loss_theta(x', y)
-            − λ ||x' − x||^2
-        )
-      ]
+Robust risk:
+Maximize expected loss over all distributions Q that are within a W2 distance budget r from the base distribution P.
+
+Dual form (plain text):
+Minimize over dual variable lambda >= 0 of:
+
+lambda * r
++ E over (x,y) from P of [
+    maximize over x_prime of (
+        loss_theta(x_prime, y) - lambda * squared_distance(x_prime, x)
+    )
+  ]
 
 Where:
+- r is the transport budget (W2 radius)
+- lambda is the dual variable
+- loss_theta is the classification loss under model parameters theta
+- squared_distance(x_prime, x) is the squared L2 transport cost
 
-- ρ is the transport budget
-- λ is the adaptive dual variable
-- loss_theta(x, y) is the classification loss
-- ||x' − x||^2 is the squared transport cost
-
-The dual variable is updated as:
-
-λ ← max(0, λ + η_lambda ( E[ ||x' − x||^2 ] − ρ ))
+Dual update (plain text):
+lambda <- max(0, lambda + eta * ( average_squared_distance - r ))
 
 ---
 
-## Design Principles
+## Constraints Used in This Repo
 
-This implementation emphasizes:
-
-- Robust optimization under explicit transport constraints
-- Adaptive dual variable learning
-- Projected gradient-based inner maximization
-- Immutable feature masking
-- CPU-only reproducibility
-- Fully interactive experimentation
+Transported inputs x_prime satisfy:
+- Box constraints: each feature lies in [0, 1]
+- Immutability: selected features are fixed and cannot change
 
 ---
 
-## Experimental Capabilities
+## What This Repo Implements
 
-The framework allows you to:
-
-- Compare ERM vs WDRO training
-- Vary transport budget ρ
-- Observe dual variable convergence
-- Measure robust vs clean accuracy
-- Visualize decision boundaries (2D case)
-
----
-
-## Project Structure
-
-app.py  
-requirements.txt  
-Dockerfile  
-README.md  
-src/  
-&nbsp;&nbsp;&nbsp;&nbsp;data.py  
-&nbsp;&nbsp;&nbsp;&nbsp;model.py  
-&nbsp;&nbsp;&nbsp;&nbsp;utils.py  
-&nbsp;&nbsp;&nbsp;&nbsp;plots.py  
-&nbsp;&nbsp;&nbsp;&nbsp;baseline/  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;erm.py  
-&nbsp;&nbsp;&nbsp;&nbsp;wdro/  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;adversary.py  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;train.py  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;eval.py  
+- ERM baseline (clean training)
+- W2 WDRO training (dual + inner adversary)
+- Inner adversary via projected gradient ascent
+- Adaptive dual variable updates to match the target transport budget
+- Interactive Streamlit interface for experimentation
+- Synthetic correlated dataset generator for reproducible tests
 
 ---
 
-## Installation
+## What You Can Explore
 
-pip install -r requirements.txt  
-streamlit run app.py  
+- Clean accuracy vs robust (adversarial-transport) accuracy
+- Effect of transport budget r on robustness
+- Dual variable behavior over training
+- Inner adversary sensitivity (steps, step size)
+- Decision boundary visualization (2D case)
+
+---
+
+## Repository Structure
+
+app.py
+requirements.txt
+Dockerfile
+README.md
+src/
+  data.py
+  model.py
+  utils.py
+  plots.py
+  baseline/
+    erm.py
+  wdro/
+    adversary.py
+    train.py
+    eval.py
+
+---
+
+## Local Run
+
+Install dependencies:
+pip install -r requirements.txt
+
+Run the app:
+streamlit run app.py
 
 ---
 
 ## Deployment
 
-### Railway
-Docker-based deployment using dynamic $PORT binding.
+Railway:
+Docker-based deployment using dynamic PORT binding.
 
-### Hugging Face Spaces
-Compatible with CPU Docker Spaces.
+Hugging Face Spaces:
+Docker-based deployment compatible with CPU instances.
 
 ---
 
@@ -111,9 +117,14 @@ MIT License
 
 ---
 
-## Citation
+## Citation 
 
 Haque, S. (2026). Wasserstein Strategic Classification (W2 WDRO). Interactive robust learning framework.
+
+
+
+
+
 
 
 
