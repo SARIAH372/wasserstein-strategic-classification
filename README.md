@@ -2,112 +2,105 @@
 
 Research-grade implementation of Wasserstein Distributionally Robust Optimization (W2 WDRO) for strategic classification under transport-bounded distribution shift.
 
-This project trains a neural classifier against worst-case transported inputs using the Kantorovich dual view (inner loss-maximizing adversary + adaptive dual updates).
+This project trains a neural classifier against worst-case transported inputs using a dual robust-optimization view: an inner loss-maximizing adversary plus adaptive dual updates.
 
 ---
 
-## Summary
+## Overview
 
-Goal:
-Train a classifier that performs well not only on the observed data distribution P, but also under worst-case distribution shifts constrained by a Wasserstein-2 transport budget.
+**Goal:** Train a classifier that remains reliable not only on the observed distribution `P`, but also under worst-case distribution shift constrained by a Wasserstein-2 transport budget.
 
-Key idea:
-Worst-case distribution shift can be handled via a dual formulation that turns robustness into (1) an inner adversary that searches for hard transported inputs and (2) an outer learner update that improves robustness.
+**Core idea:** Robust risk can be written as an outer optimization that depends on an inner “adversary” which searches for transported inputs that increase loss, while paying a squared transport cost.
 
 ---
 
-## Robust Objective (Plain Text)
+## Robust Objective (plain text)
 
-Robust risk:
-Maximize expected loss over all distributions Q that are within a W2 distance budget r from the base distribution P.
+Robust risk (conceptually):
 
-Dual form (plain text):
-Minimize over dual variable lambda >= 0 of:
+- Maximize expected loss over all distributions `Q` such that `W2(Q, P) <= r`.
 
-lambda * r
-+ E over (x,y) from P of [
-    maximize over x_prime of (
-        loss_theta(x_prime, y) - lambda * squared_distance(x_prime, x)
-    )
-  ]
+Dual form (conceptually):
 
-Where:
-- r is the transport budget (W2 radius)
-- lambda is the dual variable
-- loss_theta is the classification loss under model parameters theta
-- squared_distance(x_prime, x) is the squared L2 transport cost
+- Minimize over `lambda >= 0` the quantity:
 
-Dual update (plain text):
-lambda <- max(0, lambda + eta * ( average_squared_distance - r ))
+  - `lambda * r`
+  - `+ E_{(x,y)~P} [ max over x_prime of ( loss_theta(x_prime, y) - lambda * ||x_prime - x||^2 ) ]`
 
----
+Definitions:
 
-## Constraints Used in This Repo
+- `r` = transport budget (W2 radius)
+- `lambda` = dual variable
+- `loss_theta(x, y)` = classification loss for parameters `theta`
+- `||x_prime - x||^2` = squared L2 transport cost
 
-Transported inputs x_prime satisfy:
-- Box constraints: each feature lies in [0, 1]
-- Immutability: selected features are fixed and cannot change
+Dual update rule (conceptually):
+
+- `lambda <- max(0, lambda + eta * (avg_cost - r))`
 
 ---
 
-## What This Repo Implements
+## Constraints used in this repo
+
+Transported inputs `x_prime` satisfy:
+
+- Box constraints: each feature is in `[0, 1]`
+- Immutability: selected features are fixed (`x_prime[j] = x[j]` for immutable indices)
+
+---
+
+## What this repo implements
 
 - ERM baseline (clean training)
 - W2 WDRO training (dual + inner adversary)
 - Inner adversary via projected gradient ascent
-- Adaptive dual variable updates to match the target transport budget
+- Adaptive dual updates to match the target transport budget
 - Interactive Streamlit interface for experimentation
-- Synthetic correlated dataset generator for reproducible tests
+- Synthetic correlated dataset generator for reproducible testing
 
 ---
 
-## What You Can Explore
+## What you can explore
 
 - Clean accuracy vs robust (adversarial-transport) accuracy
-- Effect of transport budget r on robustness
-- Dual variable behavior over training
-- Inner adversary sensitivity (steps, step size)
+- Effect of transport budget `r` on robustness
+- Dual variable behavior during training
+- Sensitivity to inner adversary settings (steps, step size)
 - Decision boundary visualization (2D case)
 
 ---
 
-## Repository Structure
+## Repository structure
 
-app.py
-requirements.txt
-Dockerfile
-README.md
-src/
-  data.py
-  model.py
-  utils.py
-  plots.py
-  baseline/
-    erm.py
-  wdro/
-    adversary.py
-    train.py
-    eval.py
+- `app.py`
+- `requirements.txt`
+- `Dockerfile`
+- `README.md`
+- `src/`
+  - `data.py`
+  - `model.py`
+  - `utils.py`
+  - `plots.py`
+  - `baseline/`
+    - `erm.py`
+  - `wdro/`
+    - `adversary.py`
+    - `train.py`
+    - `eval.py`
 
 ---
 
-## Local Run
+## Local run
 
-Install dependencies:
-pip install -r requirements.txt
-
-Run the app:
-streamlit run app.py
+1) Install dependencies: `pip install -r requirements.txt`  
+2) Start the app: `streamlit run app.py`
 
 ---
 
 ## Deployment
 
-Railway:
-Docker-based deployment using dynamic PORT binding.
-
-Hugging Face Spaces:
-Docker-based deployment compatible with CPU instances.
+- Railway: Docker-based deployment using dynamic `PORT` binding.
+- Hugging Face Spaces: Docker-based deployment compatible with CPU instances.
 
 ---
 
@@ -119,15 +112,6 @@ MIT License
 
 ## Citation 
 
-Haque, S. (2026). Wasserstein Strategic Classification (W2 WDRO). Interactive robust learning framework.
-
-
-
-
-
-
-
-
-
+Sariah Haque (2026). Wasserstein Strategic Classification (W2 WDRO). Interactive robust learning framework.
 
 
