@@ -6,11 +6,11 @@ import matplotlib.pyplot as plt
 import torch
 
  
-from src_v2.data import make_synthetic
-from src_v2.model import TinyMLP
+from src.data import make_synthetic
+from src.model import TinyMLP
 
 
-from src_v4.wdro import train_wdro_w2_dual, eval_wdro_metrics
+from src.wdro import train_wdro_w2_dual, eval_wdro_metrics
 
 
 # -----------------------------
@@ -312,3 +312,4 @@ with tabs[3]:
 
         if d_int == 2 and show_2d and st.session_state.model_v4 is not None:
             st.pyplot(plot_decision_2d(X_np, y_np, st.session_state.model_v4, "v4 W2-DRO decision surface (clean grid)"))
+
