@@ -108,7 +108,7 @@ X_t = torch.tensor(X_np, dtype=torch.float32)
 y_t = torch.tensor(y_np, dtype=torch.float32).view(-1, 1)
 mask_t = torch.tensor(mask_np, dtype=torch.float32)
 
-st.write(f"Dataset: N={X_np.shape[0]}, d={X_np.shape[1]} | Mutable: {int(mask_np.sum())}/{int(d)}")
+st.write(f"Dataset: N={X_np.shape[0]}, d={X_np.shape[1]}")
 
 
 # -----------------------------
@@ -134,22 +134,20 @@ tabs = st.tabs(["Theory", "Train ERM", "Train v4 (W2 WDRO)", "Compare"])
 
 
 # -----------------------------
-# Theory tab
+# Theory
 # -----------------------------
 with tabs[0]:
     st.subheader("W2 Wasserstein Distributionally Robust Optimization")
-
     st.markdown(
         """
-This application studies classification under transport-constrained distribution shift using
-Wasserstein-2 Distributionally Robust Optimization (WDRO).
-
-Given a reference distribution P, WDRO optimizes against worst-case shifted distributions Q
-within a transport budget r.
+W2 WDRO trains a classifier to remain stable under worst-case transport-constrained distribution shifts.
 
 Training alternates between:
-- an inner adversarial transport step that increases loss while penalizing large movement, and
-- an outer model update that improves robustness under this constrained shift.
+
+- an inner adversarial transport step (loss maximization under movement penalty),
+- and an outer parameter update to improve robustness.
+
+The dual variable adapts to enforce the chosen transport budget.
 """
     )
 
@@ -161,61 +159,59 @@ with tabs[1]:
     st.subheader("Train ERM baseline")
 
     if st.button("Train ERM", type="primary"):
-        with st.spinner("Training ERM..."):
-            model = TinyMLP(int(d), hidden=int(hidden))
-            hist = train_erm(
-                model=model,
-                X=X_t,
-                y=y_t,
-                lr=float(lr),
-                epochs=int(epochs),
-                batch_size=int(batch_size),
-                seed=int(seed),
-            )
+        model = TinyMLP(int(d), hidden=int(hidden))
+        hist = train_erm(
+            model=model,
+            X=X_t,
+            y=y_t,
+            lr=float(lr),
+            epochs=int(epochs),
+            batch_size=int(batch_size),
+            seed=int(seed),
+        )
         st.session_state.model_erm = model
         st.session_state.erm_hist = hist
         st.success("ERM training complete.")
 
     if st.session_state.erm_hist is not None:
         df = pd.DataFrame(st.session_state.erm_hist)
-        st.dataframe(df.tail(20), use_container_width=True)
+        st.dataframe(df.tail(20))
         st.pyplot(plot_curve(df["epoch"], df["loss"], "epoch", "loss", "ERM loss"))
     else:
         st.caption("No ERM results yet.")
 
 
 # -----------------------------
-# Train v4 WDRO (always show outcome; show exceptions)
+# Train v4
 # -----------------------------
 with tabs[2]:
     st.subheader("Train v4: W2 WDRO")
 
     if st.button("Train v4 (W2 WDRO)", type="primary"):
         try:
-            with st.spinner("Training v4 W2-WDRO..."):
-                model = TinyMLP(int(d), hidden=int(hidden))
+            model = TinyMLP(int(d), hidden=int(hidden))
 
-                hist = train_wdro_w2_dual(
-                    model=model,
-                    X=X_t,
-                    y=y_t,
-                    mutable_mask=mask_t,
-                    rho=float(rho_budget),
-                    lam_init=float(lam_init),
-                    eta_lam=float(eta_lam),
-                    inner_steps=int(wdro_steps),
-                    inner_step_size=float(wdro_step_size),
-                    lr=float(lr),
-                    epochs=int(epochs),
-                    batch_size=int(batch_size),
-                    mix_clean_frac=0.0,
-                    seed=int(seed),
-                    max_wall_seconds=int(max_wall_seconds),
-                    verbose_every=1,
-                )
+            hist = train_wdro_w2_dual(
+                model=model,
+                X=X_t,
+                y=y_t,
+                mutable_mask=mask_t,
+                rho=float(rho_budget),
+                lam_init=float(lam_init),
+                eta_lam=float(eta_lam),
+                inner_steps=int(wdro_steps),
+                inner_step_size=float(wdro_step_size),
+                lr=float(lr),
+                epochs=int(epochs),
+                batch_size=int(batch_size),
+                mix_clean_frac=0.0,
+                seed=int(seed),
+                max_wall_seconds=int(max_wall_seconds),
+                verbose_every=1,
+            )
 
             st.session_state.model_v4 = model
-            st.session_state.v4_hist = hist  # store as-is (can be [])
+            st.session_state.v4_hist = hist
             if hist and len(hist) > 0:
                 st.session_state.lambda_v4 = float(hist[-1]["lambda_dual"])
 
@@ -223,24 +219,21 @@ with tabs[2]:
 
         except Exception as e:
             st.session_state.v4_hist = None
-            st.error("WDRO training crashed. Full error below:")
+            st.error("WDRO training crashed:")
             st.exception(e)
 
-    # SHOW RESULTS EVEN IF EMPTY LIST
     if st.session_state.v4_hist is not None:
-        st.write("epochs_returned =", len(st.session_state.v4_hist))
-
         df = pd.DataFrame(st.session_state.v4_hist)
+
+        st.write("epochs_returned =", len(df))
+
         if len(df) == 0:
-            st.warning("Training returned 0 epochs. Increase max training time or reduce settings.")
+            st.warning("Training returned 0 epochs.")
         else:
-            st.dataframe(df.tail(20), use_container_width=True)
+            st.dataframe(df.tail(20))
             st.pyplot(plot_curve(df["epoch"], df["loss_total"], "epoch", "objective", "v4 objective"))
             st.pyplot(plot_curve(df["epoch"], df["avg_cost_sq"], "epoch", "mean ||Δ||^2", "transport cost"))
             st.pyplot(plot_curve(df["epoch"], df["lambda_dual"], "epoch", "lambda", "dual variable"))
-
-            # show cost precisely
-            st.write("avg_cost_sq (last) =", f"{float(df['avg_cost_sq'].iloc[-1]):.10e}")
 
             st.metric("Final lambda", f"{st.session_state.lambda_v4:.4f}")
     else:
@@ -248,22 +241,10 @@ with tabs[2]:
 
 
 # -----------------------------
-# Compare (adds ONLY a toggle; training unchanged)
+# Compare
 # -----------------------------
 with tabs[3]:
     st.subheader("Compare ERM vs v4")
-
-    # Evaluation-only stress test: makes differences visible even when margins are large.
-    stress_test = st.checkbox("Stress-test evaluation (stronger adversary)", value=True)
-
-    if stress_test:
-        lam_eval = 0.0
-        eval_steps = max(int(wdro_steps), 30)
-        eval_step = max(float(wdro_step_size), 0.20)
-    else:
-        lam_eval = float(st.session_state.lambda_v4)
-        eval_steps = int(wdro_steps)
-        eval_step = float(wdro_step_size)
 
     rows = []
 
@@ -273,9 +254,9 @@ with tabs[3]:
             X=X_t,
             y=y_t,
             mutable_mask=mask_t,
-            lam_dual=lam_eval,
-            inner_steps=eval_steps,
-            inner_step_size=eval_step,
+            lam_dual=float(st.session_state.lambda_v4),
+            inner_steps=int(wdro_steps),
+            inner_step_size=float(wdro_step_size),
         )
         rows.append({"model": "ERM", **m_erm})
 
@@ -285,33 +266,26 @@ with tabs[3]:
             X=X_t,
             y=y_t,
             mutable_mask=mask_t,
-            lam_dual=lam_eval,
-            inner_steps=eval_steps,
-            inner_step_size=eval_step,
+            lam_dual=float(st.session_state.lambda_v4),
+            inner_steps=int(wdro_steps),
+            inner_step_size=float(wdro_step_size),
         )
         rows.append({"model": "v4 W2-WDRO", **m_v4})
 
     if rows:
-    df_compare = pd.DataFrame(rows)
-    st.dataframe(df_compare, use_container_width=True)
+        df_compare = pd.DataFrame(rows)
+        st.dataframe(df_compare)
 
-    st.markdown(
-        """
-### Interpretation of Results
+        st.markdown(
+            """
+### Interpretation
 
-Even when clean and adversarial accuracies are identical, robustness effects can still be present.
+Accuracy may remain unchanged if perturbations do not cross the decision boundary.
+However, positive `loss_increase` and non-zero transport cost indicate the adversary
+successfully stresses the model under distribution shift.
 
-The **loss increase** under adversarial transport quantifies margin stress:
-it measures how much the classifier’s objective degrades under worst-case distribution shift.
-
-- A positive `loss_increase` indicates the adversary successfully perturbs inputs.
-- `avg_cost_sq` confirms that non-zero transport occurred.
-- If `flip_rate` remains low, the model retains classification decisions despite confidence degradation.
-
-Robustness evaluation should therefore consider both accuracy and loss-based sensitivity metrics.
+Robustness evaluation should therefore consider both accuracy and loss-based sensitivity.
 """
-    )
-else:
-    st.caption("Train models first.")
-
-
+        )
+    else:
+        st.caption("Train models first.")
