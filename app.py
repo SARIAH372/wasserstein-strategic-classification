@@ -292,6 +292,26 @@ with tabs[3]:
         rows.append({"model": "v4 W2-WDRO", **m_v4})
 
     if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
-    else:
-        st.caption("Train models first.")
+    df_compare = pd.DataFrame(rows)
+    st.dataframe(df_compare, use_container_width=True)
+
+    st.markdown(
+        """
+### Interpretation of Results
+
+Even when clean and adversarial accuracies are identical, robustness effects can still be present.
+
+The **loss increase** under adversarial transport quantifies margin stress:
+it measures how much the classifier’s objective degrades under worst-case distribution shift.
+
+- A positive `loss_increase` indicates the adversary successfully perturbs inputs.
+- `avg_cost_sq` confirms that non-zero transport occurred.
+- If `flip_rate` remains low, the model retains classification decisions despite confidence degradation.
+
+Robustness evaluation should therefore consider both accuracy and loss-based sensitivity metrics.
+"""
+    )
+else:
+    st.caption("Train models first.")
+
+
