@@ -1,3 +1,6 @@
+
+
+
 import json
 from pathlib import Path
 
@@ -23,7 +26,7 @@ st.caption("Empirical study of W2 Wasserstein Distributionally Robust Optimizati
 
 
 # -----------------------------
-# Small plotting helper
+# Plot helper
 # -----------------------------
 def plot_curve(x, y, xlabel: str, ylabel: str, title: str):
     fig = plt.figure()
@@ -35,7 +38,7 @@ def plot_curve(x, y, xlabel: str, ylabel: str, title: str):
 
 
 # -----------------------------
-# Cache data + mask (fast reruns)
+# Cache data + mask
 # -----------------------------
 @st.cache_data(show_spinner=False)
 def cached_data(n, d, seed, rho_corr, nonlinear, label_noise):
@@ -52,7 +55,7 @@ def cached_data(n, d, seed, rho_corr, nonlinear, label_noise):
 def cached_mask(d, seed, immutable_frac):
     rng = np.random.default_rng(int(seed))
     d_int = int(d)
-    m = int(np.floor((1.0 - float(immutable_frac)) * d_int))  # mutable count
+    m = int(np.floor((1.0 - float(immutable_frac)) * d_int))
     perm = rng.permutation(d_int)
     mutable_idx = np.sort(perm[:m])
     mask = np.zeros(d_int, dtype=np.float32)
@@ -77,7 +80,7 @@ with st.sidebar:
     immutable_frac = st.slider("Immutable feature fraction", 0.0, 0.95, 0.25, 0.05)
 
     st.divider()
-    st.header("Model / Training")
+    st.header("Training")
     hidden = st.slider("TinyMLP hidden size", 8, 128, 32, 8)
     lr = st.slider("Learning rate", 1e-4, 5e-2, 7e-3, 1e-4)
     epochs = st.slider("Epochs", 10, 800, 120, 10)
@@ -85,76 +88,43 @@ with st.sidebar:
 
     st.divider()
     st.header("v4: W2 WDRO")
-    rho_budget = st.slider("Transport budget r (target mean ||Δ||^2)", 0.000, 2.000, 0.080, 0.005)
+    rho_budget = st.slider("Transport budget r", 0.000, 2.000, 0.080, 0.005)
     lam_init = st.slider("Initial lambda", 0.0, 50.0, 5.0, 0.5)
     eta_lam = st.slider("Dual step eta", 0.0, 5.0, 0.6, 0.05)
     wdro_steps = st.slider("Inner WDRO steps", 1, 50, 8, 1)
     wdro_step_size = st.slider("Inner WDRO step size", 0.001, 0.5, 0.08, 0.001)
 
     st.divider()
-    st.header("Stability / Safety")
     max_wall_seconds = st.slider("Max training time (seconds)", 30, 900, 240, 30)
 
-    st.divider()
-    st.header("Numerical stability")
-    lambda_floor = st.slider("Lambda floor (keep >=)", 0.0, 10.0, 0.5, 0.1)
-
-    show_2d = st.checkbox("Show 2D plot (only if d=2)", value=False)
-
 
 # -----------------------------
-# Prepare data/tensors
+# Data preparation
 # -----------------------------
 X_np, y_np = cached_data(n, d, seed, rho_corr, nonlinear, label_noise)
-mask_np, mutable_idx = cached_mask(d, seed, immutable_frac)
+mask_np, _ = cached_mask(d, seed, immutable_frac)
 
 X_t = torch.tensor(X_np, dtype=torch.float32)
 y_t = torch.tensor(y_np, dtype=torch.float32).view(-1, 1)
 mask_t = torch.tensor(mask_np, dtype=torch.float32)
 
-st.write(f"**Dataset:** N={X_np.shape[0]}, d={X_np.shape[1]} | **Mutable:** {int(mask_np.sum())}/{int(d)}")
+st.write(f"Dataset: N={X_np.shape[0]}, d={X_np.shape[1]} | Mutable: {int(mask_np.sum())}/{int(d)}")
 
 
 # -----------------------------
-# Persist results to survive reruns/restarts
+# Session state
 # -----------------------------
-ERM_SAVE = Path("/tmp/erm_results.json")
-V4_SAVE = Path("/tmp/v4_results.json")
+if "model_erm" not in st.session_state:
+    st.session_state.model_erm = None
+if "erm_hist" not in st.session_state:
+    st.session_state.erm_hist = None
 
-def load_json(path: Path):
-    try:
-        return json.loads(path.read_text())
-    except Exception:
-        return None
-
-def save_json(path: Path, obj):
-    try:
-        path.write_text(json.dumps(obj))
-    except Exception:
-        pass
-
-
-# -----------------------------
-# Session state init + load persisted
-# -----------------------------
-if "model_erm" not in st.session_state: st.session_state.model_erm = None
-if "erm_hist" not in st.session_state: st.session_state.erm_hist = None
-
-if "model_v4" not in st.session_state: st.session_state.model_v4 = None
-# IMPORTANT: keep None until trained; do NOT force [] because [] is falsey and hides results
-if "v4_hist" not in st.session_state: st.session_state.v4_hist = None
-if "lambda_v4" not in st.session_state: st.session_state.lambda_v4 = float(max(lam_init, lambda_floor))
-
-if st.session_state.erm_hist is None and ERM_SAVE.exists():
-    saved = load_json(ERM_SAVE)
-    if saved and "hist" in saved:
-        st.session_state.erm_hist = saved["hist"]
-
-if st.session_state.v4_hist is None and V4_SAVE.exists():
-    saved = load_json(V4_SAVE)
-    if saved and "hist" in saved:
-        st.session_state.v4_hist = saved["hist"]
-        st.session_state.lambda_v4 = float(saved.get("lambda_v4", st.session_state.lambda_v4))
+if "model_v4" not in st.session_state:
+    st.session_state.model_v4 = None
+if "v4_hist" not in st.session_state:
+    st.session_state.v4_hist = None
+if "lambda_v4" not in st.session_state:
+    st.session_state.lambda_v4 = float(lam_init)
 
 
 # -----------------------------
@@ -164,91 +134,66 @@ tabs = st.tabs(["Theory", "Train ERM", "Train v4 (W2 WDRO)", "Compare"])
 
 
 # -----------------------------
-# Theory tab (no formulas, clean)
+# Theory tab
 # -----------------------------
 with tabs[0]:
     st.subheader("W2 Wasserstein Distributionally Robust Optimization")
 
     st.markdown(
         """
-Standard ERM trains on the observed data distribution and can degrade when the distribution shifts.
+This application studies classification under transport-constrained distribution shift using
+Wasserstein-2 Distributionally Robust Optimization (WDRO).
 
-W2 WDRO trains a classifier to remain stable under worst-case distribution shifts that are constrained by a transport budget.
+Given a reference distribution P, WDRO optimizes against worst-case shifted distributions Q
+within a transport budget r.
 
 Training alternates between:
-- an inner step that searches for transported inputs that increase loss while penalizing large moves, and
-- an outer step that updates the model to perform well under these worst-case transported inputs.
-
-A dual variable adapts during training to control how strongly transport is penalized, targeting the chosen transport budget.
+- an inner adversarial transport step that increases loss while penalizing large movement, and
+- an outer model update that improves robustness under this constrained shift.
 """
     )
 
 
 # -----------------------------
-# Train ERM tab
+# Train ERM
 # -----------------------------
 with tabs[1]:
-    st.subheader("Train ERM baseline (clean)")
-    colA, colB = st.columns([1.2, 0.8], gap="large")
+    st.subheader("Train ERM baseline")
 
-    with colA:
-        if st.button("Train ERM", type="primary"):
-            with st.spinner("Training ERM..."):
-                model = TinyMLP(int(d), hidden=int(hidden))
-                hist = train_erm(
-                    model=model,
-                    X=X_t,
-                    y=y_t,
-                    lr=float(lr),
-                    epochs=int(epochs),
-                    batch_size=int(batch_size),
-                    seed=int(seed),
-                )
-            st.session_state.model_erm = model
-            st.session_state.erm_hist = hist
-            save_json(ERM_SAVE, {"hist": hist})
-            st.success("ERM training complete.")
-
-        if st.session_state.erm_hist is not None:
-            df = pd.DataFrame(st.session_state.erm_hist)
-            st.dataframe(df.tail(20), use_container_width=True)
-            st.pyplot(plot_curve(df["epoch"], df["loss"], "epoch", "loss", "ERM loss"))
-        else:
-            st.caption("No ERM results yet.")
-
-    with colB:
-        st.write("Quick ERM evaluation")
-        if st.session_state.model_erm is not None:
-            lam_eval = float(max(st.session_state.lambda_v4, lambda_floor))
-            m = eval_wdro_metrics(
-                model=st.session_state.model_erm,
+    if st.button("Train ERM", type="primary"):
+        with st.spinner("Training ERM..."):
+            model = TinyMLP(int(d), hidden=int(hidden))
+            hist = train_erm(
+                model=model,
                 X=X_t,
                 y=y_t,
-                mutable_mask=mask_t,
-                lam_dual=lam_eval,
-                inner_steps=int(wdro_steps),
-                inner_step_size=float(wdro_step_size),
+                lr=float(lr),
+                epochs=int(epochs),
+                batch_size=int(batch_size),
+                seed=int(seed),
             )
-            st.metric("Clean acc", f"{m['acc_clean']:.3f}")
-            st.metric("WDRO-adv acc", f"{m['acc_wdro_adv']:.3f}")
-            st.metric("avg_cost_sq", f"{m['avg_cost_sq']:.6f}")
-        else:
-            st.caption("ERM model not available.")
+        st.session_state.model_erm = model
+        st.session_state.erm_hist = hist
+        st.success("ERM training complete.")
+
+    if st.session_state.erm_hist is not None:
+        df = pd.DataFrame(st.session_state.erm_hist)
+        st.dataframe(df.tail(20), use_container_width=True)
+        st.pyplot(plot_curve(df["epoch"], df["loss"], "epoch", "loss", "ERM loss"))
+    else:
+        st.caption("No ERM results yet.")
 
 
 # -----------------------------
-# Train v4 tab (always shows results; empty history handled)
+# Train v4 WDRO (always show outcome; show exceptions)
 # -----------------------------
 with tabs[2]:
-    st.subheader("Train v4: W2 WDRO (dual + inner adversary)")
-    st.write("Trains a robust classifier using W2 Wasserstein DRO via dual optimization and an inner transport adversary.")
+    st.subheader("Train v4: W2 WDRO")
 
     if st.button("Train v4 (W2 WDRO)", type="primary"):
         try:
             with st.spinner("Training v4 W2-WDRO..."):
                 model = TinyMLP(int(d), hidden=int(hidden))
-
-                lam_init_safe = float(max(lam_init, lambda_floor))
 
                 hist = train_wdro_w2_dual(
                     model=model,
@@ -256,7 +201,7 @@ with tabs[2]:
                     y=y_t,
                     mutable_mask=mask_t,
                     rho=float(rho_budget),
-                    lam_init=lam_init_safe,
+                    lam_init=float(lam_init),
                     eta_lam=float(eta_lam),
                     inner_steps=int(wdro_steps),
                     inner_step_size=float(wdro_step_size),
@@ -267,78 +212,56 @@ with tabs[2]:
                     seed=int(seed),
                     max_wall_seconds=int(max_wall_seconds),
                     verbose_every=1,
-                    lambda_floor=float(lambda_floor),
                 )
 
             st.session_state.model_v4 = model
             st.session_state.v4_hist = hist  # store as-is (can be [])
             if hist and len(hist) > 0:
-                st.session_state.lambda_v4 = float(max(hist[-1]["lambda_dual"], lambda_floor))
-            else:
-                st.session_state.lambda_v4 = float(max(lam_init_safe, lambda_floor))
+                st.session_state.lambda_v4 = float(hist[-1]["lambda_dual"])
 
-            save_json(V4_SAVE, {"hist": st.session_state.v4_hist, "lambda_v4": st.session_state.lambda_v4})
             st.success(f"v4 training finished. epochs_returned={0 if hist is None else len(hist)}")
 
         except Exception as e:
+            st.session_state.v4_hist = None
             st.error("WDRO training crashed. Full error below:")
             st.exception(e)
-            st.session_state.v4_hist = None
 
-    # IMPORTANT: show results whenever history exists (even if empty list)
+    # SHOW RESULTS EVEN IF EMPTY LIST
     if st.session_state.v4_hist is not None:
         st.write("epochs_returned =", len(st.session_state.v4_hist))
 
         df = pd.DataFrame(st.session_state.v4_hist)
         if len(df) == 0:
-            st.warning("Training returned 0 epochs. Increase max training time or reduce inner steps/epochs.")
+            st.warning("Training returned 0 epochs. Increase max training time or reduce settings.")
         else:
-            # show small costs clearly
             st.dataframe(df.tail(20), use_container_width=True)
-
             st.pyplot(plot_curve(df["epoch"], df["loss_total"], "epoch", "objective", "v4 objective"))
             st.pyplot(plot_curve(df["epoch"], df["avg_cost_sq"], "epoch", "mean ||Δ||^2", "transport cost"))
             st.pyplot(plot_curve(df["epoch"], df["lambda_dual"], "epoch", "lambda", "dual variable"))
 
-            last_cost = float(df["avg_cost_sq"].iloc[-1])
-            st.write("avg_cost_sq (last) =", f"{last_cost:.10e}")
-            st.metric("Final lambda", f"{max(st.session_state.lambda_v4, lambda_floor):.4f}")
+            # show cost precisely
+            st.write("avg_cost_sq (last) =", f"{float(df['avg_cost_sq'].iloc[-1]):.10e}")
+
+            st.metric("Final lambda", f"{st.session_state.lambda_v4:.4f}")
     else:
         st.caption("No v4 results yet.")
 
-    colC, colD = st.columns(2)
-    with colC:
-        if st.button("Clear saved v4 results"):
-            st.session_state.v4_hist = None
-            if V4_SAVE.exists():
-                V4_SAVE.unlink()
-            st.success("Cleared v4 saved results.")
-    with colD:
-        if st.button("Clear saved ERM results"):
-            st.session_state.erm_hist = None
-            if ERM_SAVE.exists():
-                ERM_SAVE.unlink()
-            st.success("Cleared ERM saved results.")
-
 
 # -----------------------------
-# Compare tab (stress-test option so acc_wdro_adv differs from acc_clean)
+# Compare (adds ONLY a toggle; training unchanged)
 # -----------------------------
 with tabs[3]:
     st.subheader("Compare ERM vs v4")
 
-    # Evaluation-only stress test (does not change training)
+    # Evaluation-only stress test: makes differences visible even when margins are large.
     stress_test = st.checkbox("Stress-test evaluation (stronger adversary)", value=True)
 
-    # In stress-test mode:
-    # - lambda=0 makes the adversary pure loss-maximizing (no transport penalty)
-    # - we also enforce stronger eval steps so the difference is visible
     if stress_test:
         lam_eval = 0.0
         eval_steps = max(int(wdro_steps), 30)
         eval_step = max(float(wdro_step_size), 0.20)
     else:
-        lam_eval = float(max(st.session_state.lambda_v4, lambda_floor))
+        lam_eval = float(st.session_state.lambda_v4)
         eval_steps = int(wdro_steps)
         eval_step = float(wdro_step_size)
 
@@ -371,5 +294,4 @@ with tabs[3]:
     if rows:
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
     else:
-        st.caption("Models not available for comparison.")
-
+        st.caption("Train models first.")
