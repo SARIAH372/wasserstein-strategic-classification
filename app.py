@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -11,122 +14,339 @@ from src.wdro.train import train_wdro_w2_dual
 from src.wdro.eval import eval_wdro_metrics
 
 
+# -----------------------------
+# Page config
+# -----------------------------
 st.set_page_config(page_title="W2 WDRO Lab", layout="wide")
 st.title("Wasserstein Strategic Classification (W2 WDRO)")
+st.caption("ERM baseline + W2 Wasserstein DRO (dual + inner adversary), Railway-friendly and state-safe.")
 
 
-# -------------------------
-# Sidebar controls
-# -------------------------
+# -----------------------------
+# Small plotting helper
+# -----------------------------
+def plot_curve(x, y, xlabel: str, ylabel: str, title: str):
+    fig = plt.figure()
+    plt.plot(x, y)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    return fig
+
+
+# -----------------------------
+# Cache data + mask (fast reruns)
+# -----------------------------
+@st.cache_data(show_spinner=False)
+def cached_data(n, d, seed, rho_corr, nonlinear, label_noise):
+    return make_synthetic(
+        n=int(n),
+        d=int(d),
+        seed=int(seed),
+        rho=float(rho_corr),
+        nonlinear=bool(nonlinear),
+        label_noise=float(label_noise),
+    )
+
+@st.cache_data(show_spinner=False)
+def cached_mask(d, seed, immutable_frac):
+    rng = np.random.default_rng(int(seed))
+    d_int = int(d)
+    m = int(np.floor((1.0 - float(immutable_frac)) * d_int))  # mutable count
+    perm = rng.permutation(d_int)
+    mutable_idx = np.sort(perm[:m])
+    mask = np.zeros(d_int, dtype=np.float32)
+    mask[mutable_idx] = 1.0
+    return mask, mutable_idx
+
+
+# -----------------------------
+# Sidebar
+# -----------------------------
 with st.sidebar:
     st.header("Data")
-    n = st.slider("N samples", 300, 3000, 800, 100)
-    d = st.slider("Feature dim", 2, 20, 8)
-    seed = st.number_input("Seed", value=7)
-    rho_corr = st.slider("Feature correlation", 0.0, 0.95, 0.3, 0.05)
+    n = st.slider("N samples", 300, 6000, 1000, 100)
+    d = st.slider("Feature dim d", 2, 40, 8, 1)
+    seed = st.number_input("Seed", value=7, step=1)
+    rho_corr = st.slider("Feature correlation", 0.0, 0.95, 0.35, 0.05)
     nonlinear = st.checkbox("Nonlinear boundary", value=True)
-    label_noise = st.slider("Label noise", 0.0, 0.3, 0.05, 0.01)
+    label_noise = st.slider("Label noise", 0.0, 0.30, 0.05, 0.01)
 
     st.divider()
     st.header("Immutability")
-    immutable_frac = st.slider("Immutable fraction", 0.0, 0.8, 0.2, 0.05)
+    immutable_frac = st.slider("Immutable feature fraction", 0.0, 0.95, 0.25, 0.05)
 
     st.divider()
-    st.header("Training")
-    epochs = st.slider("Epochs", 20, 200, 80, 10)
-    batch_size = st.slider("Batch size", 32, 512, 256, 32)
-    lr = st.slider("Learning rate", 0.0005, 0.02, 0.005, 0.0005)
+    st.header("Model / Training")
+    hidden = st.slider("TinyMLP hidden size", 8, 128, 32, 8)
+    lr = st.slider("Learning rate", 1e-4, 5e-2, 7e-3, 1e-4)
+    epochs = st.slider("Epochs", 10, 800, 120, 10)
+    batch_size = st.slider("Batch size", 16, 512, 256, 8)
 
     st.divider()
-    st.header("WDRO")
-    rho = st.slider("Transport budget r", 0.01, 0.5, 0.08, 0.01)
-    lam_init = st.slider("Initial lambda (kept >= 1)", 1.0, 20.0, 5.0)
-    eta_lam = st.slider("Dual step", 0.01, 1.0, 0.3, 0.01)
-    inner_steps = st.slider("Inner steps", 3, 15, 6)
-    inner_step_size = st.slider("Inner step size", 0.05, 0.3, 0.12, 0.01)
+    st.header("v4: W2 WDRO")
+    rho_budget = st.slider("Transport budget r (target mean ||Δ||^2)", 0.000, 2.000, 0.080, 0.005)
+    lam_init = st.slider("Initial lambda", 0.0, 50.0, 5.0, 0.5)
+    eta_lam = st.slider("Dual step eta", 0.0, 5.0, 0.6, 0.05)
+    wdro_steps = st.slider("Inner WDRO steps", 1, 50, 8, 1)
+    wdro_step_size = st.slider("Inner WDRO step size", 0.001, 0.5, 0.08, 0.001)
+
+    st.divider()
+    st.header("Stability / Safety")
+    # This is the key to preventing "no results after 30 min"
+    max_wall_seconds = st.slider("Max training time (seconds)", 30, 900, 240, 30)
+
+    # This prevents lambda collapsing to 0 in the UI (and keeps evaluation meaningful)
+    lambda_floor = st.slider("Lambda floor (keep >=)", 0.0, 10.0, 0.5, 0.1)
+
+    show_2d = st.checkbox("Show 2D plot (only if d=2)", value=False)
 
 
-# -------------------------
-# Data
-# -------------------------
-X_np, y_np = make_synthetic(
-    n=int(n),
-    d=int(d),
-    seed=int(seed),
-    rho=float(rho_corr),
-    nonlinear=bool(nonlinear),
-    label_noise=float(label_noise),
-)
-
-rng = np.random.default_rng(int(seed))
-mask = np.ones(d, dtype=np.float32)
-num_immutable = int(immutable_frac * d)
-if num_immutable > 0:
-    imm_idx = rng.choice(d, num_immutable, replace=False)
-    mask[imm_idx] = 0.0
+# -----------------------------
+# Prepare data/tensors
+# -----------------------------
+X_np, y_np = cached_data(n, d, seed, rho_corr, nonlinear, label_noise)
+mask_np, mutable_idx = cached_mask(d, seed, immutable_frac)
 
 X_t = torch.tensor(X_np, dtype=torch.float32)
 y_t = torch.tensor(y_np, dtype=torch.float32).view(-1, 1)
-mask_t = torch.tensor(mask, dtype=torch.float32)
+mask_t = torch.tensor(mask_np, dtype=torch.float32)
 
-st.write(f"Dataset: N={n}, d={d}")
+st.write(f"**Dataset:** N={X_np.shape[0]}, d={X_np.shape[1]} | **Mutable:** {int(mask_np.sum())}/{int(d)}")
 
 
-# -------------------------
-# Train v4
-# -------------------------
-if st.button("Train W2-WDRO", type="primary"):
+# -----------------------------
+# Persist results to survive reruns/restarts
+# -----------------------------
+ERM_SAVE = Path("/tmp/erm_results.json")
+V4_SAVE = Path("/tmp/v4_results.json")
 
-    model = TinyMLP(d, hidden=32)
+def load_json(path: Path):
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
 
-    # Force lambda >= 1 so it never collapses to zero
-    lam_init_safe = max(lam_init, 1.0)
+def save_json(path: Path, obj):
+    try:
+        path.write_text(json.dumps(obj))
+    except Exception:
+        pass
 
-    hist = train_wdro_w2_dual(
-        model=model,
-        X=X_t,
-        y=y_t,
-        mutable_mask=mask_t,
-        rho=float(rho),
-        lam_init=float(lam_init_safe),
-        eta_lam=float(eta_lam),
-        inner_steps=int(inner_steps),
-        inner_step_size=float(inner_step_size),
-        lr=float(lr),
-        epochs=int(epochs),
-        batch_size=int(batch_size),
-        mix_clean_frac=0.0,
-        seed=int(seed),
-        max_wall_seconds=180,
-        verbose_every=1,
+
+# -----------------------------
+# Session state init + load persisted
+# -----------------------------
+if "model_erm" not in st.session_state: st.session_state.model_erm = None
+if "erm_hist" not in st.session_state: st.session_state.erm_hist = None
+
+if "model_v4" not in st.session_state: st.session_state.model_v4 = None
+if "v4_hist" not in st.session_state: st.session_state.v4_hist = None
+if "lambda_v4" not in st.session_state: st.session_state.lambda_v4 = float(max(lam_init, lambda_floor))
+
+# Load persisted histories (models can’t be persisted easily; we persist the history + lambda)
+if st.session_state.erm_hist is None and ERM_SAVE.exists():
+    saved = load_json(ERM_SAVE)
+    if saved and "hist" in saved:
+        st.session_state.erm_hist = saved["hist"]
+
+if st.session_state.v4_hist is None and V4_SAVE.exists():
+    saved = load_json(V4_SAVE)
+    if saved and "hist" in saved:
+        st.session_state.v4_hist = saved["hist"]
+        st.session_state.lambda_v4 = float(saved.get("lambda_v4", st.session_state.lambda_v4))
+
+
+# -----------------------------
+# Tabs
+# -----------------------------
+tabs = st.tabs(["Theory", "Train ERM", "Train v4 (W2 WDRO)", "Compare"])
+
+
+# -----------------------------
+# Tab: Theory
+# -----------------------------
+with tabs[0]:
+    st.subheader("What this lab does")
+    st.write(
+        "You can train a baseline ERM classifier, then train a W2-WDRO robust classifier using an inner "
+        "loss-maximizing transport adversary and adaptive dual updates.\n\n"
+        "If WDRO seems to do nothing (cost stays 0), increase inner WDRO steps/step size and/or reduce immutability."
     )
 
-    if hist is None or len(hist) == 0:
-        st.error("Training returned no epochs. Try lowering settings.")
-    else:
-        df = pd.DataFrame(hist)
-        st.success(f"Training completed with {len(hist)} epochs.")
 
-        st.dataframe(df.tail(10))
+# -----------------------------
+# Tab: Train ERM
+# -----------------------------
+with tabs[1]:
+    st.subheader("Train ERM baseline (clean)")
+    colA, colB = st.columns([1.2, 0.8], gap="large")
 
-        fig1 = plt.figure()
-        plt.plot(df["epoch"], df["loss_total"])
-        plt.title("Objective")
-        st.pyplot(fig1)
+    with colA:
+        if st.button("Train ERM", type="primary"):
+            with st.spinner("Training ERM..."):
+                model = TinyMLP(int(d), hidden=int(hidden))
+                hist = train_erm(
+                    model=model,
+                    X=X_t,
+                    y=y_t,
+                    lr=float(lr),
+                    epochs=int(epochs),
+                    batch_size=int(batch_size),
+                    seed=int(seed),
+                )
+            st.session_state.model_erm = model
+            st.session_state.erm_hist = hist
+            save_json(ERM_SAVE, {"hist": hist})
+            st.success("ERM training complete.")
 
-        fig2 = plt.figure()
-        plt.plot(df["epoch"], df["avg_cost_sq"])
-        plt.title("Transport cost")
-        st.pyplot(fig2)
-
-        fig3 = plt.figure()
-        plt.plot(df["epoch"], df["lambda_dual"])
-        plt.title("Lambda")
-        st.pyplot(fig3)
-
-        # Guarantee non-zero lambda display
-        final_lambda = df["lambda_dual"].iloc[-1]
-        if final_lambda == 0:
-            st.warning("Lambda collapsed to 0. Increase inner_steps or inner_step_size.")
+        if st.session_state.erm_hist:
+            df = pd.DataFrame(st.session_state.erm_hist)
+            st.dataframe(df.tail(20), use_container_width=True)
+            st.pyplot(plot_curve(df["epoch"], df["loss"], "epoch", "loss", "ERM loss"))
         else:
-            st.metric("Final lambda", round(final_lambda, 4))
+            st.caption("No ERM results yet. Click **Train ERM**.")
+
+    with colB:
+        st.write("**Quick ERM evaluation (needs a trained ERM model)**")
+        if st.session_state.model_erm is not None:
+            lam_eval = float(max(st.session_state.lambda_v4, lambda_floor))
+            m = eval_wdro_metrics(
+                model=st.session_state.model_erm,
+                X=X_t,
+                y=y_t,
+                mutable_mask=mask_t,
+                lam_dual=lam_eval,
+                inner_steps=int(wdro_steps),
+                inner_step_size=float(wdro_step_size),
+            )
+            st.metric("Clean acc", f"{m['acc_clean']:.3f}")
+            st.metric("WDRO-adv acc", f"{m['acc_wdro_adv']:.3f}")
+            st.metric("avg_cost_sq", f"{m['avg_cost_sq']:.4f}")
+        else:
+            st.caption("Train ERM first to evaluate.")
+
+
+# -----------------------------
+# Tab: Train v4
+# -----------------------------
+with tabs[2]:
+    st.subheader("Train v4: W2 WDRO (dual + inner adversary)")
+    st.write("This always returns results: output is stored in session_state and persisted to /tmp.")
+
+    if st.button("Train v4 (W2 WDRO)", type="primary"):
+        with st.spinner("Training v4 W2-WDRO..."):
+            model = TinyMLP(int(d), hidden=int(hidden))
+
+            # enforce a lambda floor so it doesn't collapse to 0
+            lam_init_safe = float(max(lam_init, lambda_floor))
+
+            hist = train_wdro_w2_dual(
+                model=model,
+                X=X_t,
+                y=y_t,
+                mutable_mask=mask_t,
+                rho=float(rho_budget),
+                lam_init=lam_init_safe,
+                eta_lam=float(eta_lam),
+                inner_steps=int(wdro_steps),
+                inner_step_size=float(wdro_step_size),
+                lr=float(lr),
+                epochs=int(epochs),
+                batch_size=int(batch_size),
+                mix_clean_frac=0.0,
+                seed=int(seed),
+                max_wall_seconds=int(max_wall_seconds),
+                verbose_every=1,
+            )
+
+        st.session_state.model_v4 = model
+        st.session_state.v4_hist = hist if hist else []
+
+        # also enforce lambda floor on stored final lambda
+        if hist and len(hist) > 0:
+            st.session_state.lambda_v4 = float(max(hist[-1]["lambda_dual"], lambda_floor))
+        else:
+            st.session_state.lambda_v4 = float(max(lam_init_safe, lambda_floor))
+
+        save_json(V4_SAVE, {"hist": st.session_state.v4_hist, "lambda_v4": st.session_state.lambda_v4})
+        st.success(f"v4 training finished. epochs_returned={len(st.session_state.v4_hist)}")
+
+    # Always render v4 results if present
+    if st.session_state.v4_hist:
+        df = pd.DataFrame(st.session_state.v4_hist)
+        st.dataframe(df.tail(20), use_container_width=True)
+
+        st.pyplot(plot_curve(df["epoch"], df["loss_total"], "epoch", "objective", "v4 objective"))
+        st.pyplot(plot_curve(df["epoch"], df["avg_cost_sq"], "epoch", "mean ||Δ||^2", "transport cost"))
+        st.pyplot(plot_curve(df["epoch"], df["lambda_dual"], "epoch", "lambda", "dual variable"))
+
+        st.metric("Final lambda used (floored)", f"{st.session_state.lambda_v4:.4f}")
+
+        # guidance if adversary isn't moving
+        try:
+            last_cost = float(df["avg_cost_sq"].iloc[-1])
+            if last_cost <= 1e-12:
+                st.warning(
+                    "Transport cost is ~0, meaning the inner adversary didn't move points.\n"
+                    "Try: increase Inner WDRO steps (e.g., 12–20), increase Inner step size (e.g., 0.12–0.20), "
+                    "and/or reduce Immutable fraction."
+                )
+        except Exception:
+            pass
+    else:
+        st.caption("No v4 results yet. Click **Train v4** to run.")
+
+    colC, colD = st.columns(2)
+    with colC:
+        if st.button("Clear saved v4 results"):
+            st.session_state.v4_hist = None
+            if V4_SAVE.exists():
+                V4_SAVE.unlink()
+            st.success("Cleared v4 saved results.")
+    with colD:
+        if st.button("Clear saved ERM results"):
+            st.session_state.erm_hist = None
+            if ERM_SAVE.exists():
+                ERM_SAVE.unlink()
+            st.success("Cleared ERM saved results.")
+
+
+# -----------------------------
+# Tab: Compare
+# -----------------------------
+with tabs[3]:
+    st.subheader("Compare ERM vs v4 under WDRO adversary")
+    lam_eval = float(max(st.session_state.lambda_v4, lambda_floor))
+
+    rows = []
+
+    if st.session_state.model_erm is not None:
+        m_erm = eval_wdro_metrics(
+            model=st.session_state.model_erm,
+            X=X_t,
+            y=y_t,
+            mutable_mask=mask_t,
+            lam_dual=lam_eval,
+            inner_steps=int(wdro_steps),
+            inner_step_size=float(wdro_step_size),
+        )
+        rows.append({"model": "ERM", **m_erm})
+
+    if st.session_state.model_v4 is not None:
+        m_v4 = eval_wdro_metrics(
+            model=st.session_state.model_v4,
+            X=X_t,
+            y=y_t,
+            mutable_mask=mask_t,
+            lam_dual=lam_eval,
+            inner_steps=int(wdro_steps),
+            inner_step_size=float(wdro_step_size),
+        )
+        rows.append({"model": "v4 W2-WDRO", **m_v4})
+
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        st.caption("Note: evaluation uses lambda = max(final_lambda, lambda_floor) to avoid degenerate lambda=0.")
+    else:
+        st.caption("Train ERM and/or v4 first, then return here.")
