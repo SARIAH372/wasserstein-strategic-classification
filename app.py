@@ -170,56 +170,18 @@ with tabs[0]:
 
     st.markdown(
         """
-### What problem is being addressed?
+Standard ERM trains on the observed data distribution and can degrade when the distribution shifts.
 
-Standard ERM (Empirical Risk Minimization) trains a classifier on a fixed data distribution.
-However, real-world data can shift. Even small distribution changes can degrade performance.
+W2 WDRO trains a classifier to remain stable under worst-case distribution shifts that are constrained by a transport budget.
 
-W2 Wasserstein Distributionally Robust Optimization (WDRO) trains a model to remain stable
-under worst-case distribution shifts that are constrained by a transport budget.
+The method alternates between:
+- an inner step that searches for transported inputs that increase loss while penalizing large moves, and
+- an outer step that updates the model to perform well under these worst-case transported inputs.
 
----
-
-### Core idea (intuitive explanation)
-
-Instead of training only on the observed data, WDRO assumes that the data may shift slightly.
-
-Training proceeds in two coupled steps:
-
-1. **Inner step (adversary):**
-   The algorithm searches for a modified version of each input that increases the model’s loss,
-   but penalizes large deviations using a squared transport cost.
-
-2. **Outer step (model update):**
-   The classifier is updated to perform well even on these worst-case transported inputs.
-
-A dual variable automatically adjusts how strongly transport is penalized,
-ensuring the average transport distance stays near the chosen budget.
-
----
-
-### What the controls mean
-
-- **Transport budget (r):**
-  Controls how much distribution shift is allowed.
-  Larger values encourage stronger robustness.
-
-- **Inner WDRO steps / step size:**
-  Determines how aggressively the adversary searches for hard examples.
-
-- **Immutable feature fraction:**
-  Specifies which features cannot change during transport.
-  Higher values restrict the adversary.
-
----
-
-### Interpretation
-
-- ERM optimizes performance on the observed distribution.
-- WDRO optimizes performance under constrained worst-case perturbations.
-- The comparison tab shows the trade-off between clean accuracy and robustness.
+A dual variable adapts during training to control how strongly transport is penalized, targeting the chosen transport budget.
 """
     )
+
 
 
 
@@ -306,6 +268,8 @@ with tabs[2]:
                 seed=int(seed),
                 max_wall_seconds=int(max_wall_seconds),
                 verbose_every=1,
+                lambda_floor=float(lambda_floor),
+
             )
 
         st.session_state.model_v4 = model
@@ -391,4 +355,5 @@ with tabs[3]:
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
     else:
         st.caption("Models not available for comparison.")
+
 
