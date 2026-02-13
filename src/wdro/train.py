@@ -22,18 +22,22 @@ def train_wdro_w2_dual(
     batch_size: int,
     mix_clean_frac: float,
     seed: int = 7,
-    max_wall_seconds: int = 240,      # <-- NEW: stop after 4 minutes
-    verbose_every: int = 1,           # <-- NEW: log every epoch
+    max_wall_seconds: int = 240,
+    verbose_every: int = 1,
+    lambda_floor: float = 0.5,   # <-- NEW: never let lambda collapse to 0
 ):
     """
-    W2 WDRO dual training with a wall-time cap.
+    W2 WDRO dual training with wall-time cap and a lambda floor.
     Returns partial history if capped (so Streamlit can always display something).
     """
     start = time.time()
     opt = torch.optim.Adam(model.parameters(), lr=float(lr))
-    lam = float(max(lam_init, 0.0))
-    hist = []
 
+    # clamp init lambda to floor
+    lam_floor = float(max(lambda_floor, 0.0))
+    lam = float(max(lam_init, lam_floor))
+
+    hist = []
     n = X.shape[0]
     model.train()
 
@@ -82,12 +86,16 @@ def train_wdro_w2_dual(
             losses.append(float(total.item()))
             costs.append(float(cost_sq))
 
-            # wall-time cap (prevents Railway kill with no output)
             if (time.time() - start) > max_wall_seconds:
                 break
 
         avg_cost_sq = float(np.mean(costs)) if costs else 0.0
-        lam = max(0.0, lam + float(eta_lam) * (avg_cost_sq - float(rho)))
+
+        # dual update (correct sign): lam += eta * (cost - rho)
+        lam = lam + float(eta_lam) * (avg_cost_sq - float(rho))
+
+        # enforce lambda floor (prevents collapse to 0)
+        lam = float(max(lam, lam_floor))
 
         row = {
             "epoch": ep,
@@ -100,7 +108,11 @@ def train_wdro_w2_dual(
         hist.append(row)
 
         if verbose_every and (ep % int(verbose_every) == 0):
-            print(f"[v4] ep={ep} loss={row['loss_total']:.4f} cost={row['avg_cost_sq']:.4f} lam={row['lambda_dual']:.3f} t={row['elapsed_sec']:.1f}s")
+            print(
+                f"[v4] ep={ep} loss={row['loss_total']:.4f} "
+                f"cost={row['avg_cost_sq']:.6f} rho={row['rho']:.4f} "
+                f"lam={row['lambda_dual']:.4f} t={row['elapsed_sec']:.1f}s"
+            )
 
         if (time.time() - start) > max_wall_seconds:
             break
