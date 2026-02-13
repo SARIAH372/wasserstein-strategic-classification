@@ -19,7 +19,7 @@ from src.wdro.eval import eval_wdro_metrics
 # -----------------------------
 st.set_page_config(page_title="W2 WDRO Lab", layout="wide")
 st.title("Wasserstein Strategic Classification (W2 WDRO)")
-st.caption("ERM baseline + W2 Wasserstein DRO (dual + inner adversary), Railway-friendly and state-safe.")
+st.caption("Empirical study of W2 Wasserstein Distributionally Robust Optimization under transport-constrained shift.")
 
 
 # -----------------------------
@@ -93,10 +93,10 @@ with st.sidebar:
 
     st.divider()
     st.header("Stability / Safety")
-    # This is the key to preventing "no results after 30 min"
     max_wall_seconds = st.slider("Max training time (seconds)", 30, 900, 240, 30)
 
-    # This prevents lambda collapsing to 0 in the UI (and keeps evaluation meaningful)
+    st.divider()
+    st.header("Numerical stability")
     lambda_floor = st.slider("Lambda floor (keep >=)", 0.0, 10.0, 0.5, 0.1)
 
     show_2d = st.checkbox("Show 2D plot (only if d=2)", value=False)
@@ -144,7 +144,6 @@ if "model_v4" not in st.session_state: st.session_state.model_v4 = None
 if "v4_hist" not in st.session_state: st.session_state.v4_hist = None
 if "lambda_v4" not in st.session_state: st.session_state.lambda_v4 = float(max(lam_init, lambda_floor))
 
-# Load persisted histories (models can’t be persisted easily; we persist the history + lambda)
 if st.session_state.erm_hist is None and ERM_SAVE.exists():
     saved = load_json(ERM_SAVE)
     if saved and "hist" in saved:
@@ -167,11 +166,37 @@ tabs = st.tabs(["Theory", "Train ERM", "Train v4 (W2 WDRO)", "Compare"])
 # Tab: Theory
 # -----------------------------
 with tabs[0]:
-    st.subheader("What this lab does")
-    st.write(
-        "You can train a baseline ERM classifier, then train a W2-WDRO robust classifier using an inner "
-        "loss-maximizing transport adversary and adaptive dual updates.\n\n"
-        "If WDRO seems to do nothing (cost stays 0), increase inner WDRO steps/step size and/or reduce immutability."
+    st.subheader("W2 Wasserstein Distributionally Robust Optimization")
+
+    st.markdown(
+        """
+This application studies classification under transport-constrained distribution shift using
+Wasserstein-2 Distributionally Robust Optimization (WDRO).
+
+### Robust Objective
+
+Given a reference distribution P, WDRO optimizes against worst-case shifted distributions Q
+within a Wasserstein-2 ball of radius r:
+
+sup over Q such that W2(Q, P) <= r of E_Q[ loss_theta(x, y) ]
+
+Using the Kantorovich dual formulation, this becomes:
+
+min over theta and lambda >= 0 of:
+
+lambda * r
++ E_{(x,y) ~ P} [
+    sup over x' of ( loss_theta(x', y) - lambda * ||x' - x||^2 )
+]
+
+where:
+- r is the transport budget
+- lambda is the dual variable
+- ||x' - x||^2 is the squared transport cost
+
+The inner maximization is approximated via projected gradient ascent
+subject to box and immutability constraints.
+"""
     )
 
 
@@ -205,10 +230,10 @@ with tabs[1]:
             st.dataframe(df.tail(20), use_container_width=True)
             st.pyplot(plot_curve(df["epoch"], df["loss"], "epoch", "loss", "ERM loss"))
         else:
-            st.caption("No ERM results yet. Click **Train ERM**.")
+            st.caption("No ERM results yet.")
 
     with colB:
-        st.write("**Quick ERM evaluation (needs a trained ERM model)**")
+        st.write("Quick ERM evaluation")
         if st.session_state.model_erm is not None:
             lam_eval = float(max(st.session_state.lambda_v4, lambda_floor))
             m = eval_wdro_metrics(
@@ -224,7 +249,7 @@ with tabs[1]:
             st.metric("WDRO-adv acc", f"{m['acc_wdro_adv']:.3f}")
             st.metric("avg_cost_sq", f"{m['avg_cost_sq']:.4f}")
         else:
-            st.caption("Train ERM first to evaluate.")
+            st.caption("ERM model not available.")
 
 
 # -----------------------------
@@ -232,7 +257,7 @@ with tabs[1]:
 # -----------------------------
 with tabs[2]:
     st.subheader("Train v4: W2 WDRO (dual + inner adversary)")
-    st.write("This always returns results: output is stored in session_state and persisted to /tmp.")
+    st.write("Trains a robust classifier using W2 Wasserstein DRO via dual optimization and inner transport adversary.")
 
     if st.button("Train v4 (W2 WDRO)", type="primary"):
         with st.spinner("Training v4 W2-WDRO..."):
@@ -263,7 +288,6 @@ with tabs[2]:
         st.session_state.model_v4 = model
         st.session_state.v4_hist = hist if hist else []
 
-        # also enforce lambda floor on stored final lambda
         if hist and len(hist) > 0:
             st.session_state.lambda_v4 = float(max(hist[-1]["lambda_dual"], lambda_floor))
         else:
@@ -272,7 +296,6 @@ with tabs[2]:
         save_json(V4_SAVE, {"hist": st.session_state.v4_hist, "lambda_v4": st.session_state.lambda_v4})
         st.success(f"v4 training finished. epochs_returned={len(st.session_state.v4_hist)}")
 
-    # Always render v4 results if present
     if st.session_state.v4_hist:
         df = pd.DataFrame(st.session_state.v4_hist)
         st.dataframe(df.tail(20), use_container_width=True)
@@ -281,21 +304,17 @@ with tabs[2]:
         st.pyplot(plot_curve(df["epoch"], df["avg_cost_sq"], "epoch", "mean ||Δ||^2", "transport cost"))
         st.pyplot(plot_curve(df["epoch"], df["lambda_dual"], "epoch", "lambda", "dual variable"))
 
-        st.metric("Final lambda used (floored)", f"{st.session_state.lambda_v4:.4f}")
+        st.metric("Final lambda", f"{max(st.session_state.lambda_v4, lambda_floor):.4f}")
 
-        # guidance if adversary isn't moving
+        # formal note if adversary is not moving points
         try:
             last_cost = float(df["avg_cost_sq"].iloc[-1])
             if last_cost <= 1e-12:
-                st.warning(
-                    "Transport cost is ~0, meaning the inner adversary didn't move points.\n"
-                    "Try: increase Inner WDRO steps (e.g., 12–20), increase Inner step size (e.g., 0.12–0.20), "
-                    "and/or reduce Immutable fraction."
-                )
+                st.info("Observed transport cost is near zero under current hyperparameters.")
         except Exception:
             pass
     else:
-        st.caption("No v4 results yet. Click **Train v4** to run.")
+        st.caption("No v4 results yet.")
 
     colC, colD = st.columns(2)
     with colC:
@@ -347,6 +366,5 @@ with tabs[3]:
 
     if rows:
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        st.caption("Note: evaluation uses lambda = max(final_lambda, lambda_floor) to avoid degenerate lambda=0.")
     else:
-        st.caption("Train ERM and/or v4 first, then return here.")
+        st.caption("Models not available for comparison.")
