@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 
+
 def wdro_inner_max_w2(
     model,
     x0: torch.Tensor,          # (b,d) in [0,1]
@@ -15,27 +16,30 @@ def wdro_inner_max_w2(
 
       x_adv = argmax_x  BCEWithLogits(model(x), y) - lam * mean(||x-x0||^2)
 
-    with constraints:
+    constraints:
       - box: x in [0,1]^d
       - immutability: x_j = x0_j for mask_j = 0
 
-    Notes:
+    Implementation notes:
       - Requires gradients w.r.t. x.
       - Uses projected gradient ascent.
-      - Returns a detached tensor (safe for outer loops).
+      - Adds a tiny random jitter on mutable dims to avoid flat-start traps.
+      - Returns a detached tensor.
     """
-    model.eval()  # adversary uses current model parameters; no dropout anyway
+    model.eval()
 
     mask = mutable_mask.view(1, -1).to(dtype=x0.dtype, device=x0.device)
-    x = x0.detach().clone()  # start at x0
-
-# tiny random jitter on mutable dimensions to avoid zero-gradient / flat-start traps
-if mask.sum() > 0:
-    x = x + 0.01 * torch.randn_like(x) * mask
-    x = torch.clamp(x, 0.0, 1.0)
-    x = x * mask + x0_det * (1.0 - mask)
-
     x0_det = x0.detach()
+
+    # start at x0
+    x = x0_det.clone()
+
+    # ---- NEW: tiny random jitter on mutable dims to avoid zero-gradient / flat-start traps
+    if float(mask.sum().item()) > 0.0:
+        x = x + 0.01 * torch.randn_like(x) * mask
+        x = torch.clamp(x, 0.0, 1.0)
+        x = x * mask + x0_det * (1.0 - mask)
+    # -------------------------------------------------------------------------------
 
     lam = float(max(lam_dual, 0.0))
     eta = float(step_size)
@@ -52,7 +56,7 @@ if mask.sum() > 0:
         # maximize objective
         obj = loss - lam * cost
 
-        # gradient wrt x (no graph needed here)
+        # gradient wrt x
         g = torch.autograd.grad(obj, x, create_graph=False, retain_graph=False)[0]
 
         # apply immutability: only mutable dims can move
@@ -68,4 +72,3 @@ if mask.sum() > 0:
         x = x * mask + x0_det * (1.0 - mask)
 
     return x.detach()
-
