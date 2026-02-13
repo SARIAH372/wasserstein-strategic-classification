@@ -339,21 +339,22 @@ with tabs[3]:
         )
         rows.append({"model": "ERM", **m_erm})
 
-    if st.session_state.model_v4 is not None:
-        m_v4 = eval_wdro_metrics(
-            model=st.session_state.model_v4,
-            X=X_t,
-            y=y_t,
-            mutable_mask=mask_t,
-            lam_dual=lam_eval,
-            inner_steps=int(wdro_steps),
-            inner_step_size=float(wdro_step_size),
-        )
-        rows.append({"model": "v4 W2-WDRO", **m_v4})
+    if st.session_state.v4_hist is not None:
+    df = pd.DataFrame(st.session_state.v4_hist)
 
-    if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    if len(df) == 0:
+        st.warning("Training returned 0 epochs. Increase max_wall_seconds or reduce settings.")
     else:
-        st.caption("Models not available for comparison.")
+        st.dataframe(df.tail(20), use_container_width=True)
+
+        st.pyplot(plot_curve(df["epoch"], df["loss_total"], "epoch", "objective", "v4 objective"))
+        st.pyplot(plot_curve(df["epoch"], df["avg_cost_sq"], "epoch", "mean ||Δ||^2", "transport cost"))
+        st.pyplot(plot_curve(df["epoch"], df["lambda_dual"], "epoch", "lambda", "dual variable"))
+
+        st.metric("Final lambda", f"{max(st.session_state.lambda_v4, lambda_floor):.4f}")
+else:
+    st.caption("No v4 results yet.")
+
+
 
 
