@@ -170,34 +170,57 @@ with tabs[0]:
 
     st.markdown(
         """
-This application studies classification under transport-constrained distribution shift using
-Wasserstein-2 Distributionally Robust Optimization (WDRO).
+### What problem is being addressed?
 
-### Robust Objective
+Standard ERM (Empirical Risk Minimization) trains a classifier on a fixed data distribution.
+However, real-world data can shift. Even small distribution changes can degrade performance.
 
-Given a reference distribution P, WDRO optimizes against worst-case shifted distributions Q
-within a Wasserstein-2 ball of radius r:
+W2 Wasserstein Distributionally Robust Optimization (WDRO) trains a model to remain stable
+under worst-case distribution shifts that are constrained by a transport budget.
 
-sup over Q such that W2(Q, P) <= r of E_Q[ loss_theta(x, y) ]
+---
 
-Using the Kantorovich dual formulation, this becomes:
+### Core idea (intuitive explanation)
 
-min over theta and lambda >= 0 of:
+Instead of training only on the observed data, WDRO assumes that the data may shift slightly.
 
-lambda * r
-+ E_{(x,y) ~ P} [
-    sup over x' of ( loss_theta(x', y) - lambda * ||x' - x||^2 )
-]
+Training proceeds in two coupled steps:
 
-where:
-- r is the transport budget
-- lambda is the dual variable
-- ||x' - x||^2 is the squared transport cost
+1. **Inner step (adversary):**
+   The algorithm searches for a modified version of each input that increases the model’s loss,
+   but penalizes large deviations using a squared transport cost.
 
-The inner maximization is approximated via projected gradient ascent
-subject to box and immutability constraints.
+2. **Outer step (model update):**
+   The classifier is updated to perform well even on these worst-case transported inputs.
+
+A dual variable automatically adjusts how strongly transport is penalized,
+ensuring the average transport distance stays near the chosen budget.
+
+---
+
+### What the controls mean
+
+- **Transport budget (r):**
+  Controls how much distribution shift is allowed.
+  Larger values encourage stronger robustness.
+
+- **Inner WDRO steps / step size:**
+  Determines how aggressively the adversary searches for hard examples.
+
+- **Immutable feature fraction:**
+  Specifies which features cannot change during transport.
+  Higher values restrict the adversary.
+
+---
+
+### Interpretation
+
+- ERM optimizes performance on the observed distribution.
+- WDRO optimizes performance under constrained worst-case perturbations.
+- The comparison tab shows the trade-off between clean accuracy and robustness.
 """
     )
+
 
 
 # -----------------------------
@@ -368,3 +391,4 @@ with tabs[3]:
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
     else:
         st.caption("Models not available for comparison.")
+
