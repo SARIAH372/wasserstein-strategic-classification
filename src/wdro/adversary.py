@@ -28,6 +28,13 @@ def wdro_inner_max_w2(
 
     mask = mutable_mask.view(1, -1).to(dtype=x0.dtype, device=x0.device)
     x = x0.detach().clone()  # start at x0
+
+# tiny random jitter on mutable dimensions to avoid zero-gradient / flat-start traps
+if mask.sum() > 0:
+    x = x + 0.01 * torch.randn_like(x) * mask
+    x = torch.clamp(x, 0.0, 1.0)
+    x = x * mask + x0_det * (1.0 - mask)
+
     x0_det = x0.detach()
 
     lam = float(max(lam_dual, 0.0))
@@ -61,3 +68,4 @@ def wdro_inner_max_w2(
         x = x * mask + x0_det * (1.0 - mask)
 
     return x.detach()
+
