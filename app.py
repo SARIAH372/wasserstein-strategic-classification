@@ -238,6 +238,10 @@ with tabs[2]:
 with tabs[3]:
     st.subheader("Compare ERM vs v4")
 
+    # Stress-test toggle (evaluation only; training unchanged)
+    stress_test = st.checkbox("Stress-test evaluation (lambda = 0)", value=True)
+    lam_eval = 0.0 if stress_test else float(st.session_state.lambda_v4)
+
     rows = []
 
     if st.session_state.model_erm is not None:
@@ -246,7 +250,7 @@ with tabs[3]:
             X=X_t,
             y=y_t,
             mutable_mask=mask_t,
-            lam_dual=float(st.session_state.lambda_v4),
+            lam_dual=lam_eval,
             inner_steps=int(wdro_steps),
             inner_step_size=float(wdro_step_size),
         )
@@ -258,7 +262,7 @@ with tabs[3]:
             X=X_t,
             y=y_t,
             mutable_mask=mask_t,
-            lam_dual=float(st.session_state.lambda_v4),
+            lam_dual=lam_eval,
             inner_steps=int(wdro_steps),
             inner_step_size=float(wdro_step_size),
         )
@@ -266,8 +270,14 @@ with tabs[3]:
 
     if rows:
         st.dataframe(pd.DataFrame(rows))
+        if stress_test:
+            st.caption("Stress-test mode uses a pure loss-maximizing adversary (lambda=0) for evaluation.")
+        else:
+            st.caption("Evaluation uses the trained dual lambda.")
     else:
         st.caption("Train models first.")
 
 
+
           
+
